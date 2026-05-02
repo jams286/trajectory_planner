@@ -18,6 +18,7 @@ from environment.grid_env import GridEnvironment
 
 # Drawing modes
 MODE_DRAW = "draw"
+MODE_DRAW_CELL = "draw_cell"
 MODE_ERASE = "erase"
 MODE_START = "start"
 MODE_GOAL = "goal"
@@ -30,6 +31,9 @@ class PlannerCanvas:
         self.ax = ax
         self.title = title
         self._grid_img = None
+        self._grid_lines_h = []
+        self._grid_lines_v = []
+        self._show_grid = False
         self._open_scatter = None
         self._closed_scatter = None
         self._current_scatter = None
@@ -53,6 +57,24 @@ class PlannerCanvas:
             extent=(-0.5, env.cols - 0.5, env.rows - 0.5, -0.5),
             interpolation="nearest",
         )
+
+        # Grid lines (hidden by default)
+        self._grid_lines_h = []
+        self._grid_lines_v = []
+        for r in range(env.rows + 1):
+            line, = self.ax.plot(
+                [-0.5, env.cols - 0.5], [r - 0.5, r - 0.5],
+                color=config.COLOR_GRID_LINE, linewidth=0.4, zorder=0.5,
+                visible=self._show_grid,
+            )
+            self._grid_lines_h.append(line)
+        for c in range(env.cols + 1):
+            line, = self.ax.plot(
+                [c - 0.5, c - 0.5], [-0.5, env.rows - 0.5],
+                color=config.COLOR_GRID_LINE, linewidth=0.4, zorder=0.5,
+                visible=self._show_grid,
+            )
+            self._grid_lines_v.append(line)
 
         # Scatter / line placeholders
         self._open_scatter = self.ax.scatter([], [], s=12, c=config.COLOR_OPEN_SET, zorder=2)
@@ -112,6 +134,11 @@ class PlannerCanvas:
             self._path_line.set_data(cols, rows)
         else:
             self._path_line.set_data([], [])
+
+    def set_grid_visible(self, visible: bool) -> None:
+        self._show_grid = visible
+        for line in self._grid_lines_h + self._grid_lines_v:
+            line.set_visible(visible)
 
     def clear_state(self) -> None:
         self.update_state(PlannerState())
@@ -182,6 +209,13 @@ class CanvasWidget:
     def set_mode(self, mode: str) -> None:
         self.mode = mode
 
+    def toggle_grid(self) -> None:
+        show = not self.canvas_astar._show_grid
+        self.canvas_astar.set_grid_visible(show)
+        self.canvas_rrt.set_grid_visible(show)
+        self.tk_canvas.draw_idle()
+        return show
+
     # ------------------------------------------------------------------
     # Mouse event handlers
     # ------------------------------------------------------------------
@@ -209,12 +243,28 @@ class CanvasWidget:
                 self._on_goal(cell)
         elif self.mode == MODE_DRAW:
             self._drag_start = cell
+        elif self.mode == MODE_DRAW_CELL:
+            # Single-cell drawing mode
+            if self._on_draw:
+                self._on_draw(cell[1], cell[0], 1, 1)
         elif self.mode == MODE_ERASE:
             if self._on_erase:
                 self._on_erase(cell)
 
     def _on_motion(self, event) -> None:
-        if self.mode == MODE_DRAW and self._drag_start is not None:
+        if self.mode == MODE_DRAW_CELL:
+            # Continuous cell painting while dragging
+            if event.button == 1:
+                cell = self._pixel_to_cell(event)
+                if cell is not None and self._on_draw:
+                    self._on_draw(cell[1], cell[0], 1, 1)
+        elif self.mode == MODE_ERASE:
+            # Continuous erasing while dragging
+            if event.button == 1:
+                cell = self._pixel_to_cell(event)
+                if cell is not None and self._on_erase:
+                    self._on_erase(cell)
+        elif self.mode == MODE_DRAW and self._drag_start is not None:
             cell = self._pixel_to_cell(event)
             if cell is None:
                 return

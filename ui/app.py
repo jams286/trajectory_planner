@@ -70,6 +70,7 @@ class MainApp:
             "pause": self._pause,
             "reset": self._reset,
             "clear_obstacles": self._clear_obstacles,
+            "toggle_grid": self._toggle_grid,
         })
         self.control.pack(fill=tk.Y, expand=True)
 
@@ -137,6 +138,9 @@ class MainApp:
 
     def _change_mode(self, mode: str) -> None:
         self.canvas.set_mode(mode)
+
+    def _toggle_grid(self) -> bool:
+        return self.canvas.toggle_grid()
 
     # ==================================================================
     # Algorithm execution

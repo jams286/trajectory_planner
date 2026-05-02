@@ -8,7 +8,7 @@ from typing import Callable, Dict, Optional
 
 import config
 from environment.map_presets import PRESETS
-from ui.canvas_widget import MODE_DRAW, MODE_ERASE, MODE_GOAL, MODE_START
+from ui.canvas_widget import MODE_DRAW, MODE_DRAW_CELL, MODE_ERASE, MODE_GOAL, MODE_START
 
 
 class ControlPanel(ttk.Frame):
@@ -59,7 +59,8 @@ class ControlPanel(ttk.Frame):
         row += 1
 
         self.mode_var = tk.StringVar(value=MODE_DRAW)
-        for label, mode in [("Draw Obstacle", MODE_DRAW), ("Erase", MODE_ERASE),
+        for label, mode in [("Draw Obstacle", MODE_DRAW), ("Draw Cell", MODE_DRAW_CELL),
+                            ("Erase", MODE_ERASE),
                             ("Set Start", MODE_START), ("Set Goal", MODE_GOAL)]:
             rb = ttk.Radiobutton(self, text=label, variable=self.mode_var, value=mode,
                                  command=self._on_mode_changed)
@@ -194,6 +195,9 @@ class ControlPanel(ttk.Frame):
         self.clear_obs_btn = ttk.Button(btn_frame, text="🗑 Clear Obstacles", command=self._on_clear_obs)
         self.clear_obs_btn.pack(fill="x", pady=2)
 
+        self.grid_btn = ttk.Button(btn_frame, text="▦ Show Grid", command=self._on_toggle_grid)
+        self.grid_btn.pack(fill="x", pady=2)
+
         # Make column 1 expand
         self.columnconfigure(1, weight=1)
 
@@ -235,3 +239,9 @@ class ControlPanel(ttk.Frame):
         cb = self._callbacks.get("clear_obstacles")
         if cb:
             cb()
+
+    def _on_toggle_grid(self) -> None:
+        cb = self._callbacks.get("toggle_grid")
+        if cb:
+            visible = cb()
+            self.grid_btn.config(text="▦ Hide Grid" if visible else "▦ Show Grid")
