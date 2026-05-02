@@ -6,6 +6,10 @@
 ![NumPy](https://img.shields.io/badge/NumPy-2.4-013243?logo=numpy)
 ![Matplotlib](https://img.shields.io/badge/Matplotlib-3.10-11557c)
 
+<p align="center">
+  <img src="docs/Maze.gif" alt="Trajectory Planner Demo" width="600">
+</p>
+
 An interactive 2D path-planning application that compares **A\*** (grid-based) and **RRT / RRT\*** (sampling-based) algorithms side by side, featuring:
 
 - **A\* Search** with three configurable heuristics (Manhattan, Euclidean, Diagonal)
