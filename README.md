@@ -1,19 +1,24 @@
 # 🗺️ Trajectory Planner — A* vs RRT
 
+![Tests](https://github.com/jams286/trajectory_planner/actions/workflows/tests.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![NumPy](https://img.shields.io/badge/NumPy-2.4-013243?logo=numpy)
 ![Matplotlib](https://img.shields.io/badge/Matplotlib-3.10-11557c)
 
-An interactive 2D path-planning application that compares **A\*** (grid-based) and **RRT** (sampling-based) algorithms side by side, featuring:
+An interactive 2D path-planning application that compares **A\*** (grid-based) and **RRT / RRT\*** (sampling-based) algorithms side by side, featuring:
 
 - **A\* Search** with three configurable heuristics (Manhattan, Euclidean, Diagonal)
 - **RRT** with tunable step size, goal bias, and collision detection
+- **RRT\*** — asymptotically optimal variant with neighbourhood rewiring
+- **Online replanning** — automatic re-computation when dynamic obstacles invalidate a path
 - **Interactive environment editor** — draw obstacles, set start/goal with the mouse
 - **Dynamic obstacles** — linear (bouncing) and circular (orbital)
 - **Step-by-step animation** of both algorithms running simultaneously
+- **GIF export** — save animations for presentations and documentation
 - **Quantitative comparison** — path length, computation time, nodes explored
-- **62 unit tests** with 100 % pass rate
+- **76 unit tests** with 100 % pass rate
+- **CI/CD** — GitHub Actions runs tests on every push across Python 3.10–3.12
 
 > Built as a portfolio project demonstrating path-planning algorithms from first principles using only NumPy and Matplotlib.
 
@@ -84,16 +89,47 @@ for i = 1 to max_iterations:
 
 #### Key properties
 
-| Property | A\* | RRT |
-|----------|-----|-----|
-| Completeness | ✅ (finite grid) | Probabilistically complete |
-| Optimality | ✅ (admissible h) | ❌ (suboptimal; RRT\* needed) |
-| Space | Discrete grid | Continuous |
-| Best for | Small/medium grids | High-dimensional / continuous spaces |
+| Property | A\* | RRT | RRT\* |
+|----------|-----|-----|-------|
+| Completeness | ✅ (finite grid) | Probabilistically complete | Probabilistically complete |
+| Optimality | ✅ (admissible h) | ❌ (suboptimal) | ✅ (asymptotically optimal) |
+| Space | Discrete grid | Continuous | Continuous |
+| Best for | Small/medium grids | Fast feasible paths | Optimal continuous paths |
 
 ---
 
-### 3. Dynamic Obstacles
+### 3. RRT\* — Optimal Rewiring
+
+RRT\* extends RRT by rewiring the tree after each new node insertion. For each new node `x_new`, it:
+
+1. Searches a neighbourhood of radius `r(n)` for candidate parents with lower cost.
+2. Rewires existing nearby nodes through `x_new` if this reduces their cost-to-come.
+
+The asymptotic optimal rewire radius (2-D):
+
+```
+r(n) = min(γ · √(log(n)/n),  3 · step_size)
+
+γ = 2 · √(W·H / π)
+```
+
+where `W×H` is the workspace area and `n` is the current tree size. As `n → ∞`, the path converges to the true optimal path.
+
+---
+
+### 4. Online Replanning
+
+When dynamic obstacles are present and the "Online Replanning" option is enabled, the system continuously monitors the current path. After each obstacle update tick:
+
+1. Check every segment of the current path for collisions.
+2. If a collision is detected, identify the first invalidated segment index `i`.
+3. Restart planning from the last safe waypoint `path[i]` to the original goal.
+
+This gives the appearance of the agent reacting to moving obstacles in real-time.
+
+---
+
+### 5. Dynamic Obstacles
 
 Two motion models are implemented:
 
@@ -127,18 +163,24 @@ trajectory_planner/
 │   ├── __init__.py
 │   ├── base_planner.py       # Abstract base planner interface
 │   ├── astar.py              # A* search with multiple heuristics
-│   └── rrt.py                # Rapidly-exploring Random Tree
+│   ├── rrt.py                # Rapidly-exploring Random Tree
+│   ├── rrt_star.py           # RRT* with asymptotic optimal rewiring
+│   └── replanner.py          # Online replanning for dynamic obstacles
 ├── metrics/
 │   ├── __init__.py
 │   └── evaluator.py          # Metrics collection and comparison
 ├── tests/
-│   └── test_planner.py       # 62 unit tests (pytest)
+│   └── test_planner.py       # 76 unit tests (pytest)
+├── .github/
+│   └── workflows/
+│       └── tests.yml         # CI/CD — pytest on Python 3.10–3.12
 └── ui/
     ├── __init__.py
     ├── app.py                # Main application orchestrator
     ├── canvas_widget.py      # Matplotlib canvas with mouse interaction
     ├── control_panel.py      # Parameter controls and action buttons
-    └── metrics_panel.py      # Comparison charts and tables
+    ├── metrics_panel.py      # Comparison charts and tables
+    └── gif_export.py         # GIF animation export
 ```
 
 ---
@@ -184,13 +226,17 @@ pytest tests/ -v
 | **Reset** | Click "↺ Reset" to clear paths and restore environment |
 | **Change speed** | Adjust the Steps/Frame and Interval sliders |
 | **Load preset** | Select from the Map Preset dropdown |
+| **Switch RRT variant** | Select "RRT" or "RRT*" from the Variant dropdown |
+| **Enable replanning** | Check "🔄 Online Replanning" (best with Dynamic Demo preset) |
+| **Export GIF** | Click "📷 Export GIF" to save the animation |
 
 ### Algorithm Parameters
 
 **A\***
 - Heuristic: Manhattan · Euclidean · Diagonal
 
-**RRT**
+**RRT / RRT\***
+- Variant: RRT (fast feasible) or RRT* (asymptotically optimal)
 - Step size: distance extended per iteration (0.5–5.0)
 - Max iterations: upper limit on tree expansion (500–20 000)
 - Goal bias: probability [0–1] of sampling toward the goal
@@ -201,7 +247,7 @@ pytest tests/ -v
 ## 📊 Test Results
 
 ```
-62 passed
+76 passed
 
 TestStaticObstacle          (6 tests)  — containment, rasterization, properties
 TestDynamicLinearObstacle   (3 tests)  — movement, boundary bounce, reset
@@ -212,6 +258,8 @@ TestMapPresets              (8 tests)  — all presets return valid obstacle lis
 TestAStarPlanner            (8 tests)  — path finding, start/goal correctness, blocked, all heuristics, step generator
 TestHeuristics              (5 tests)  — values, admissibility, overestimation
 TestRRTPlanner              (5 tests)  — path finding, start position, tree growth, goal bias effect
+TestRRTStarPlanner          (6 tests)  — path finding, tree edges, rewire radius, obstacles
+TestOnlineReplanner         (6 tests)  — valid/invalid path detection, collision index, replan start
 TestMetrics                 (6 tests)  — path length, collector, comparison dict, reset, timer tracking
 TestPlannerState            (2 tests)  — default and custom state
 ```
@@ -240,10 +288,11 @@ Example comparison on the Maze preset (50×50 grid):
 
 ## 🗺️ Roadmap
 
-- [ ] **RRT\*** — optimal rewiring variant with asymptotic convergence
-- [ ] **GIF / video export** — save animations for presentations
+- [x] **RRT\*** — optimal rewiring variant with asymptotic convergence
+- [x] **GIF / video export** — save animations for presentations
+- [x] **Online replanning** — dynamic obstacle avoidance during execution
+- [x] **CI/CD** — GitHub Actions with Python 3.10–3.12 matrix
 - [ ] **Continuous space** — obstacle-free Voronoi-based environment
-- [ ] **Online replanning** — dynamic obstacle avoidance during execution
 - [ ] **Additional algorithms** — Dijkstra, PRM, Bi-directional RRT
 - [ ] **3D extension** — extend to 3D workspace with quaternion rotations
 

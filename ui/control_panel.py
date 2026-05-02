@@ -98,6 +98,16 @@ class ControlPanel(ttk.Frame):
         )
         row += 1
 
+        # RRT variant selector
+        ttk.Label(self, text="Variant").grid(row=row, column=0, sticky="w")
+        self.rrt_variant_var = tk.StringVar(value="RRT")
+        rrt_cb = ttk.Combobox(
+            self, textvariable=self.rrt_variant_var,
+            values=["RRT", "RRT*"], state="readonly", width=14,
+        )
+        rrt_cb.grid(row=row, column=1, sticky="ew", padx=(4, 0))
+        row += 1
+
         # Step size
         ttk.Label(self, text="Step Size").grid(row=row, column=0, sticky="w")
         self.step_size_var = tk.DoubleVar(value=config.RRT_STEP_SIZE)
@@ -198,6 +208,17 @@ class ControlPanel(ttk.Frame):
         self.grid_btn = ttk.Button(btn_frame, text="▦ Show Grid", command=self._on_toggle_grid)
         self.grid_btn.pack(fill="x", pady=2)
 
+        self.export_btn = ttk.Button(btn_frame, text="📷 Export GIF", command=self._on_export_gif)
+        self.export_btn.pack(fill="x", pady=2)
+
+        # ── Replanning toggle ────────────────────────────────────────
+        self.replan_var = tk.BooleanVar(value=False)
+        self.replan_check = ttk.Checkbutton(
+            btn_frame, text="🔄 Online Replanning",
+            variable=self.replan_var,
+        )
+        self.replan_check.pack(fill="x", pady=2)
+
         # Make column 1 expand
         self.columnconfigure(1, weight=1)
 
@@ -245,3 +266,8 @@ class ControlPanel(ttk.Frame):
         if cb:
             visible = cb()
             self.grid_btn.config(text="▦ Hide Grid" if visible else "▦ Show Grid")
+
+    def _on_export_gif(self) -> None:
+        cb = self._callbacks.get("export_gif")
+        if cb:
+            cb()

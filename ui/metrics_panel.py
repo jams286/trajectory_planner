@@ -56,18 +56,28 @@ class MetricsPanel(ttk.Frame):
 
     def update_metrics(self, data: Dict[str, Dict[str, str]]) -> None:
         """Refresh table and charts from MetricsCollector.comparison_dict()."""
+        # Determine the RRT variant name from the data keys
+        rrt_key = "RRT"
+        for k in data:
+            if k.startswith("RRT"):
+                rrt_key = k
+                break
+
+        # ── Update table heading ──────────────────────────────────────
+        self.tree.heading("rrt", text=rrt_key)
+
         # ── Update table ──────────────────────────────────────────────
         for item in self.tree.get_children():
             self.tree.delete(item)
 
         astar_data = data.get("A*", {})
-        rrt_data = data.get("RRT", {})
+        rrt_data = data.get(rrt_key, {})
         metrics = ["Path Length", "Compute Time", "Nodes Explored", "Path Found"]
         for m in metrics:
             self.tree.insert("", tk.END, values=(m, astar_data.get(m, "–"), rrt_data.get(m, "–")))
 
         # ── Update bar charts ─────────────────────────────────────────
-        names = ["A*", "RRT"]
+        names = ["A*", rrt_key]
         colors = [config.COLOR_OPEN_SET, config.COLOR_RRT_TREE]
 
         def _safe_float(d: Dict[str, str], key: str) -> float:

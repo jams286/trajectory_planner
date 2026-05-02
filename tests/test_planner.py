@@ -20,6 +20,8 @@ from environment.grid_env import GridEnvironment
 from environment.map_presets import PRESETS
 from algorithms.astar import AStarPlanner, HEURISTIC_MAP
 from algorithms.rrt import RRTPlanner
+from algorithms.rrt_star import RRTStarPlanner
+from algorithms.replanner import OnlineReplanner
 from algorithms.base_planner import PlannerState
 from metrics.evaluator import MetricsCollector, _path_length
 
@@ -428,3 +430,112 @@ class TestPlannerState:
         assert len(s.open_set) == 1
         assert len(s.path) == 2
         assert s.done
+
+
+# ======================================================================
+# RRT* Planner
+# ======================================================================
+
+class TestRRTStarPlanner:
+    def _empty_env(self):
+        env = GridEnvironment(20, 20)
+        return env
+
+    def test_finds_path(self):
+        env = self._empty_env()
+        planner = RRTStarPlanner(env, step_size=1.5, max_iter=3000, goal_threshold=1.5)
+        final = None
+        for state in planner.step_generator((2, 2), (17, 17)):
+            final = state
+            if state.done:
+                break
+        assert final is not None
+        assert final.done
+        assert len(final.path) >= 2
+
+    def test_step_generator_yields_states(self):
+        env = self._empty_env()
+        planner = RRTStarPlanner(env, step_size=1.5, max_iter=100)
+        states = list(planner.step_generator((2, 2), (17, 17)))
+        assert len(states) > 0
+        for s in states:
+            assert isinstance(s, PlannerState)
+
+    def test_tree_edges_populated(self):
+        env = self._empty_env()
+        planner = RRTStarPlanner(env, step_size=1.5, max_iter=100)
+        last = None
+        for state in planner.step_generator((2, 2), (17, 17)):
+            last = state
+        assert last is not None
+        assert len(last.tree_edges) > 0
+
+    def test_rewire_radius_decreases(self):
+        env = self._empty_env()
+        planner = RRTStarPlanner(env)
+        r10 = planner._rewire_radius(10)
+        r1000 = planner._rewire_radius(1000)
+        assert r1000 < r10
+
+    def test_fixed_rewire_radius(self):
+        env = self._empty_env()
+        planner = RRTStarPlanner(env, rewire_radius=5.0)
+        assert planner._rewire_radius(10) == 5.0
+        assert planner._rewire_radius(1000) == 5.0
+
+    def test_path_around_obstacle(self):
+        env = self._empty_env()
+        # Wall across the middle
+        env.add_obstacle(StaticObstacle(0, 10, 18, 1))
+        planner = RRTStarPlanner(env, step_size=1.0, max_iter=5000, goal_threshold=1.5)
+        final = None
+        for state in planner.step_generator((5, 5), (15, 15)):
+            final = state
+            if state.done:
+                break
+        assert final is not None
+        assert final.done
+
+
+# ======================================================================
+# Online Replanner
+# ======================================================================
+
+class TestOnlineReplanner:
+    def _env_with_path(self):
+        env = GridEnvironment(20, 20)
+        path = [(r, 5) for r in range(2, 18)]  # straight vertical path
+        return env, path
+
+    def test_valid_path_on_clear_grid(self):
+        env, path = self._env_with_path()
+        assert OnlineReplanner.path_is_valid(env, path)
+
+    def test_invalid_path_with_obstacle(self):
+        env, path = self._env_with_path()
+        env.add_obstacle(StaticObstacle(5, 10, 1, 1))  # block the path
+        assert not OnlineReplanner.path_is_valid(env, path)
+
+    def test_first_collision_index_none(self):
+        env, path = self._env_with_path()
+        assert OnlineReplanner.first_collision_index(env, path) is None
+
+    def test_first_collision_index_found(self):
+        env, path = self._env_with_path()
+        env.add_obstacle(StaticObstacle(5, 10, 1, 1))
+        idx = OnlineReplanner.first_collision_index(env, path)
+        assert idx is not None
+        # Collision is at the segment that crosses row 10
+        assert path[idx][0] <= 10 <= path[idx + 1][0] or path[idx + 1][0] <= 10 <= path[idx][0]
+
+    def test_replan_start_returns_safe_point(self):
+        env, path = self._env_with_path()
+        env.add_obstacle(StaticObstacle(5, 10, 1, 1))
+        idx = OnlineReplanner.first_collision_index(env, path)
+        start = OnlineReplanner.replan_start(path, idx)
+        assert start == path[idx]
+
+    def test_replan_start_at_beginning(self):
+        path = [(0, 0), (1, 1), (2, 2)]
+        start = OnlineReplanner.replan_start(path, 0)
+        assert start == (0, 0)

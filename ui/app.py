@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
-from typing import Generator, Optional
+from tkinter import ttk, filedialog, messagebox
+from typing import Generator, List, Optional, Tuple
 
 import config
 from algorithms.astar import AStarPlanner
 from algorithms.base_planner import PlannerState
+from algorithms.replanner import OnlineReplanner
 from algorithms.rrt import RRTPlanner
+from algorithms.rrt_star import RRTStarPlanner
 from environment.grid_env import GridEnvironment
 from environment.map_presets import PRESETS
 from environment.obstacle import StaticObstacle
@@ -41,6 +43,10 @@ class MainApp:
         self._running = False
         self._after_id: Optional[str] = None
 
+        # Replanning state
+        self._astar_path: List[Tuple[float, float]] = []
+        self._rrt_path: List[Tuple[float, float]] = []
+
         # ── Layout ────────────────────────────────────────────────────
         #  ┌──────────┬──────────────────────────────────┐
         #  │ Controls │         Canvas (dual)            │
@@ -71,6 +77,7 @@ class MainApp:
             "reset": self._reset,
             "clear_obstacles": self._clear_obstacles,
             "toggle_grid": self._toggle_grid,
+            "export_gif": self._export_gif,
         })
         self.control.pack(fill=tk.Y, expand=True)
 
@@ -142,27 +149,79 @@ class MainApp:
     def _toggle_grid(self) -> bool:
         return self.canvas.toggle_grid()
 
+    def _export_gif(self) -> None:
+        """Export animation as GIF using current settings."""
+        from ui.gif_export import export_gif
+
+        path = filedialog.asksaveasfilename(
+            defaultextension=".gif",
+            filetypes=[("GIF files", "*.gif"), ("All files", "*.*")],
+            title="Save animation as GIF",
+        )
+        if not path:
+            return
+
+        rrt_variant = self.control.rrt_variant_var.get()
+        rrt_kwargs = dict(
+            env=self.env,
+            step_size=self.control.step_size_var.get(),
+            max_iter=self.control.max_iter_var.get(),
+            goal_bias=self.control.goal_bias_var.get(),
+            goal_threshold=self.control.goal_thresh_var.get(),
+        )
+        planners = {
+            "A*": AStarPlanner(self.env, heuristic=self.control.heuristic_var.get()),
+        }
+        if rrt_variant == "RRT*":
+            planners["RRT*"] = RRTStarPlanner(**rrt_kwargs)
+        else:
+            planners["RRT"] = RRTPlanner(**rrt_kwargs)
+
+        try:
+            saved = export_gif(
+                env=self.env,
+                planners=planners,
+                start=self.start,
+                goal=self.goal,
+                output_path=path,
+                steps_per_frame=self.control.steps_per_frame_var.get(),
+            )
+            messagebox.showinfo("GIF Exported", f"Saved to:\n{saved}")
+        except Exception as exc:
+            messagebox.showerror("Export Error", str(exc))
+
     # ==================================================================
     # Algorithm execution
     # ==================================================================
 
     def _create_generators(self) -> None:
         astar = AStarPlanner(self.env, heuristic=self.control.heuristic_var.get())
-        rrt = RRTPlanner(
-            self.env,
+
+        rrt_variant = self.control.rrt_variant_var.get()
+        rrt_kwargs = dict(
+            env=self.env,
             step_size=self.control.step_size_var.get(),
             max_iter=self.control.max_iter_var.get(),
             goal_bias=self.control.goal_bias_var.get(),
             goal_threshold=self.control.goal_thresh_var.get(),
         )
+        if rrt_variant == "RRT*":
+            rrt = RRTStarPlanner(**rrt_kwargs)
+            self.canvas.canvas_rrt.title = "RRT*"
+        else:
+            rrt = RRTPlanner(**rrt_kwargs)
+            self.canvas.canvas_rrt.title = "RRT"
+
         self._astar_gen = astar.step_generator(self.start, self.goal)
         self._rrt_gen = rrt.step_generator(self.start, self.goal)
         self._astar_done = False
         self._rrt_done = False
+        self._astar_path = []
+        self._rrt_path = []
 
         self.metrics.reset()
         self.metrics.start_timer("A*")
-        self.metrics.start_timer("RRT")
+        self.metrics.start_timer(rrt_variant)
 
     def _run(self) -> None:
         """Start animated execution of both algorithms."""
@@ -170,9 +229,9 @@ class MainApp:
         # Clear previous visualisation
         self.canvas.canvas_astar.clear_state()
         self.canvas.canvas_rrt.clear_state()
-        self.canvas.init_plots(self.start, self.goal)
 
         self._create_generators()
+        self.canvas.init_plots(self.start, self.goal)
         self._running = True
         self._tick()
 
@@ -182,8 +241,8 @@ class MainApp:
             self._stop_animation()
             self.canvas.canvas_astar.clear_state()
             self.canvas.canvas_rrt.clear_state()
-            self.canvas.init_plots(self.start, self.goal)
             self._create_generators()
+            self.canvas.init_plots(self.start, self.goal)
         self._running = False
         self._advance_frame()
 
@@ -231,10 +290,48 @@ class MainApp:
 
     def _advance_frame(self) -> None:
         steps = self.control.steps_per_frame_var.get()
+        rrt_name = self.control.rrt_variant_var.get()
+        replan_enabled = self.control.replan_var.get()
 
         # Update dynamic obstacles
         self.env.update_dynamic_obstacles()
         self.canvas.refresh_grid()
+
+        # ── Online replanning check ───────────────────────────────────
+        if replan_enabled:
+            if self._astar_done and self._astar_path:
+                if not OnlineReplanner.path_is_valid(self.env, self._astar_path):
+                    ci = OnlineReplanner.first_collision_index(self.env, self._astar_path)
+                    if ci is not None:
+                        new_start = OnlineReplanner.replan_start(self._astar_path, ci)
+                        astar = AStarPlanner(self.env, heuristic=self.control.heuristic_var.get())
+                        self._astar_gen = astar.step_generator(new_start, self.goal)
+                        self._astar_done = False
+                        self._astar_path = []
+                        self.metrics.reset("A*")
+                        self.metrics.start_timer("A*")
+
+            if self._rrt_done and self._rrt_path:
+                if not OnlineReplanner.path_is_valid(self.env, self._rrt_path):
+                    ci = OnlineReplanner.first_collision_index(self.env, self._rrt_path)
+                    if ci is not None:
+                        new_start = OnlineReplanner.replan_start(self._rrt_path, ci)
+                        rrt_kwargs = dict(
+                            env=self.env,
+                            step_size=self.control.step_size_var.get(),
+                            max_iter=self.control.max_iter_var.get(),
+                            goal_bias=self.control.goal_bias_var.get(),
+                            goal_threshold=self.control.goal_thresh_var.get(),
+                        )
+                        if rrt_name == "RRT*":
+                            rrt = RRTStarPlanner(**rrt_kwargs)
+                        else:
+                            rrt = RRTPlanner(**rrt_kwargs)
+                        self._rrt_gen = rrt.step_generator(new_start, self.goal)
+                        self._rrt_done = False
+                        self._rrt_path = []
+                        self.metrics.reset(rrt_name)
+                        self.metrics.start_timer(rrt_name)
 
         # ── A* steps ──────────────────────────────────────────────────
         if self._astar_gen and not self._astar_done:
@@ -245,6 +342,7 @@ class MainApp:
                     self.canvas.canvas_astar.update_state(state)
                     if state.done:
                         self._astar_done = True
+                        self._astar_path = list(state.path)
                         self.metrics.stop_timer("A*", state.path)
                         break
                 except StopIteration:
@@ -257,15 +355,19 @@ class MainApp:
             for _ in range(steps):
                 try:
                     state = next(self._rrt_gen)
-                    self.metrics.track_step("RRT")
+                    self.metrics.track_step(rrt_name)
                     self.canvas.canvas_rrt.update_state(state)
                     if state.done:
                         self._rrt_done = True
-                        self.metrics.stop_timer("RRT", state.path)
+                        self._rrt_path = list(state.path)
+                        self.metrics.stop_timer(rrt_name, state.path)
                         break
+                    # For RRT*, show improving path as it's found
+                    if state.path:
+                        self._rrt_path = list(state.path)
                 except StopIteration:
                     self._rrt_done = True
-                    self.metrics.stop_timer("RRT")
+                    self.metrics.stop_timer(rrt_name)
                     break
 
         # ── Refresh ───────────────────────────────────────────────────
